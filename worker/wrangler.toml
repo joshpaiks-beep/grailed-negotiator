@@ -1,0 +1,6 @@
+name = "grailed-negotiator"
+main = "src/index.js"
+compatibility_date = "2026-03-23"
+
+[vars]
+# Set OPENAI_API_KEY as a secret via: wrangler secret put OPENAI_API_KEY

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grailed Auto-Negotiator Settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="options-shell">
+      <section class="hero">
+        <p class="eyebrow">Settings</p>
+        <h1>Negotiation controls, future AI wiring, and historical deal data.</h1>
+      </section>
+
+      <section class="panel">
+        <h2>Core Settings</h2>
+        <form id="settings-form" class="settings-form">
+          <label class="checkbox-row">
+            <input id="ai-mode" name="aiMode" type="checkbox" checked>
+            <span>Enable AI Negotiation (GPT-4.1 mini)</span>
+          </label>
+          <label>
+            <span>AI Worker URL</span>
+            <input id="worker-url" name="workerUrl" type="text" placeholder="https://grailed-negotiator.YOUR_SUBDOMAIN.workers.dev">
+          </label>
+          <label>
+            <span>Cloudflare Worker API Key</span>
+            <input id="api-key" name="apiKey" type="password" placeholder="Saved for future AI mode">
+          </label>
+          <label>
+            <span>Default Aggressiveness</span>
+            <input id="default-aggressiveness" name="defaultAggressiveness" type="range" min="0" max="100">
+          </label>
+          <label class="checkbox-row">
+            <input id="notifications-enabled" name="notificationsEnabled" type="checkbox">
+            <span>Enable notifications</span>
+          </label>
+          <div class="grid-two">
+            <label>
+              <span>Offers per hour</span>
+              <input id="offer-limit-hour" name="offerLimitHour" type="number" min="1" step="1">
+            </label>
+            <label>
+              <span>Offers per day</span>
+              <input id="offer-limit-day" name="offerLimitDay" type="number" min="1" step="1">
+            </label>
+          </div>
+          <label>
+            <span>Blocked sellers</span>
+            <textarea id="blocked-sellers" name="blockedSellers" rows="4" placeholder="One seller per line"></textarea>
+          </label>
+          <button class="cta-button" type="submit">Save Settings</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Price History / Deal Log</h2>
+        <div id="deal-log" class="deal-log"></div>
+      </section>
+    </main>
+
+    <script src="../lib/storage.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

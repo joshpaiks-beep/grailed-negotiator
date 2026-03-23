@@ -1,0 +1,23 @@
+.grailed-negotiator-overlay {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 68, 68, 0.4);
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.92);
+  color: #ffffff;
+  font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.grailed-negotiator-overlay[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}

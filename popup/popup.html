@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grailed Auto-Negotiator</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup-shell">
+      <section class="hero">
+        <p class="eyebrow">Grailed Auto-Negotiator</p>
+        <h1>Run smart offer flows without babysitting every listing.</h1>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Search Setup</h2>
+          <button id="refresh-button" class="ghost-button" type="button">Refresh Tab</button>
+        </div>
+        <form id="config-form" class="config-form">
+          <label>
+            <span>Brand</span>
+            <input id="brand" name="brand" type="text" placeholder="Rick Owens">
+          </label>
+          <div class="grid-two">
+            <label>
+              <span>Size</span>
+              <input id="size" name="size" type="text" placeholder="M / 32">
+            </label>
+            <label>
+              <span>Category</span>
+              <input id="category" name="category" type="text" placeholder="Outerwear">
+            </label>
+          </div>
+          <label>
+            <span>Max Price</span>
+            <input id="max-price" name="maxPrice" type="number" min="1" step="1" placeholder="250">
+          </label>
+          <label class="slider-field">
+            <div class="slider-header">
+              <span>Aggressiveness</span>
+              <strong id="aggressiveness-label">Balanced</strong>
+            </div>
+            <input id="aggressiveness" name="aggressiveness" type="range" min="0" max="100" value="45">
+            <div class="slider-scale">
+              <span>Chill</span>
+              <span>Savage</span>
+            </div>
+          </label>
+          <button id="start-stop-button" class="cta-button" type="submit">Start Negotiation</button>
+        </form>
+      </section>
+
+      <section class="panel stats-panel">
+        <div class="stats-grid">
+          <article>
+            <span>Total Savings</span>
+            <strong id="stat-savings">$0</strong>
+          </article>
+          <article>
+            <span>Active</span>
+            <strong id="stat-active">0</strong>
+          </article>
+          <article>
+            <span>Deals Won</span>
+            <strong id="stat-won">0</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Activity</h2>
+          <div class="stat-pills">
+            <span id="pill-offers">0 offers</span>
+            <span id="pill-counters">0 counters</span>
+          </div>
+        </div>
+        <div id="activity-feed" class="activity-feed"></div>
+      </section>
+
+      <footer class="footer">
+        <a href="../options/options.html" target="_blank" rel="noreferrer">Settings</a>
+      </footer>
+    </main>
+
+    <script src="../lib/storage.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
