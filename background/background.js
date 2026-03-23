@@ -4,8 +4,10 @@ const OFFER_ALARM_PREFIX = "offer:";
 const EXECUTION_TABS = new Map();
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await GrailedStorage.setSettings({});
-  await GrailedStorage.setRuntime({});
+  await Promise.all([
+    GrailedStorage.getSettings(),
+    GrailedStorage.getRuntime()
+  ]);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -13,7 +15,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .then((result) => sendResponse({ ok: true, ...result }))
     .catch((error) => {
       console.error("Message handling failed", error);
-      sendResponse({ ok: false, error: error.message });
+      sendResponse({ ok: false, error: error?.message || "Unknown background error." });
     });
   return true;
 });
@@ -27,10 +29,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await executeNegotiation(listingId);
   } catch (error) {
     console.error("Alarm execution failed", error);
+    await requeueNegotiation(listingId, error?.message || "Failed to execute negotiation alarm.");
   }
 });
 
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.status !== "complete" || !EXECUTION_TABS.has(tabId)) {
     return;
   }
@@ -43,11 +46,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     });
   } catch (error) {
     console.error("Failed to dispatch execution step", error);
+    await requeueNegotiation(context.listingId, "Grailed page was not ready for automation.");
+    await closeExecutionTab(tabId);
   }
 });
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  EXECUTION_TABS.delete(tabId);
+});
+
 async function handleMessage(message, sender) {
-  switch (message.type) {
+  switch (message?.type) {
     case "POPUP_GET_STATE":
       return getPopupState();
     case "START_AUTOMATION":
@@ -62,6 +71,8 @@ async function handleMessage(message, sender) {
       return handleExecutionResult(message.payload, sender);
     case "REFRESH_FROM_ACTIVE_TAB":
       return refreshFromActiveTab();
+    case "GENERATE_NEGOTIATION_MESSAGE":
+      return generateNegotiationMessage(message.payload);
     default:
       return {};
   }
@@ -76,32 +87,21 @@ async function getPopupState() {
 }
 
 async function getOptionsState() {
-  const [runtime, settings] = await Promise.all([
-    GrailedStorage.getRuntime(),
-    GrailedStorage.getSettings()
-  ]);
-  return { runtime, settings };
+  return getPopupState();
 }
 
 async function saveSettings(payload) {
-  // Persist AI-specific settings to chrome.storage.local for ai-negotiator.js
-  if (payload.aiMode !== undefined || payload.workerUrl) {
-    await chrome.storage.local.set({
-      aiMode: payload.aiMode !== false,
-      workerUrl: payload.workerUrl || '',
-    });
-  }
-  const settings = await GrailedStorage.setSettings(payload);
+  const settings = await GrailedStorage.setSettings(payload || {});
   return { settings };
 }
 
 async function startAutomation(config, sender) {
-  const runtime = await GrailedStorage.getRuntime();
-  const sourceTabId = sender.tab?.id || config.sourceTabId || null;
+  const sourceTabId = sender.tab?.id || config?.sourceTabId || null;
+  const normalizedConfig = normalizeAutomationConfig(config);
   await GrailedStorage.setRuntime({
     automation: {
       running: true,
-      config,
+      config: normalizedConfig,
       startedAt: new Date().toISOString(),
       sourceTabId
     }
@@ -111,7 +111,7 @@ async function startAutomation(config, sender) {
     message: "Automation started.",
     timestamp: new Date().toISOString()
   });
-  await seedFromTab(sourceTabId, config);
+  await seedFromTab(sourceTabId, normalizedConfig);
   await scheduleQueuedNegotiations();
   return getPopupState();
 }
@@ -120,6 +120,7 @@ async function stopAutomation() {
   const runtime = await GrailedStorage.getRuntime();
   const alarmNames = Object.keys(runtime.negotiations).map((listingId) => `${OFFER_ALARM_PREFIX}${listingId}`);
   await Promise.all(alarmNames.map((name) => chrome.alarms.clear(name)));
+  await Promise.all(Array.from(EXECUTION_TABS.keys()).map((tabId) => closeExecutionTab(tabId)));
   await GrailedStorage.setRuntime({
     automation: {
       ...runtime.automation,
@@ -137,15 +138,37 @@ async function stopAutomation() {
 async function refreshFromActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message: "No active tab available to refresh.",
+      timestamp: new Date().toISOString()
+    });
     return getPopupState();
   }
   const runtime = await GrailedStorage.getRuntime();
   if (!runtime.automation.config) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message: "Set up automation in the popup before refreshing.",
+      timestamp: new Date().toISOString()
+    });
     return getPopupState();
   }
   await seedFromTab(tab.id, runtime.automation.config);
   await scheduleQueuedNegotiations();
   return getPopupState();
+}
+
+async function generateNegotiationMessage(payload) {
+  const { listing, config, negotiation, sellerCounter, targetOffer } = payload || {};
+  const messageResult = await GrailedAI.getMessage(
+    listing || {},
+    config || {},
+    negotiation || {},
+    sellerCounter ?? null,
+    Number(targetOffer) || 0
+  );
+  return { messageResult };
 }
 
 async function seedFromTab(tabId, config) {
@@ -163,7 +186,12 @@ async function seedFromTab(tabId, config) {
     });
     return;
   }
-  if (!response?.ok) {
+  if (!response?.ok || !response.page) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message: response?.error || "Could not read the active Grailed page.",
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 
@@ -173,14 +201,21 @@ async function seedFromTab(tabId, config) {
 
   const settings = await GrailedStorage.getSettings();
   const blockedSellers = new Set(settings.blockedSellers.map((seller) => seller.toLowerCase()));
+  let discoveredCount = 0;
 
   for (const listing of listings) {
+    if (!listing?.listingId || !listing?.url || !listing?.price) {
+      continue;
+    }
     if (!matchesSearchFilters(listing, config)) {
       continue;
     }
     if (listing.sellerName && blockedSellers.has(listing.sellerName.toLowerCase())) {
       continue;
     }
+
+    const runtime = await GrailedStorage.getRuntime();
+    const existing = runtime.negotiations[listing.listingId] || {};
     const record = {
       listingId: listing.listingId,
       url: listing.url,
@@ -188,24 +223,48 @@ async function seedFromTab(tabId, config) {
       askingPrice: listing.price,
       brand: listing.brand,
       size: listing.size,
-      sellerName: listing.sellerName || "",
-      sellerResponseHours: listing.sellerResponseHours || null,
-      rounds: 0,
-      lastOffer: null,
-      sellerCounter: null,
-      status: "queued",
-      createdAt: new Date().toISOString(),
+      category: listing.category || "",
+      sellerName: listing.sellerName || existing.sellerName || "",
+      sellerResponseHours: listing.sellerResponseHours ?? existing.sellerResponseHours ?? null,
+      rounds: existing.rounds || 0,
+      lastOffer: existing.lastOffer || null,
+      sellerCounter: listing.counterOffer ?? existing.sellerCounter ?? null,
+      history: Array.isArray(existing.history) ? existing.history : [],
+      status: existing.status && existing.status !== "lost" && existing.status !== "won" && existing.status !== "walked"
+        ? existing.status
+        : "queued",
+      createdAt: existing.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     await GrailedStorage.upsertNegotiation(record);
+    discoveredCount += 1;
   }
+
+  await GrailedStorage.appendActivity({
+    type: "system",
+    message: discoveredCount
+      ? `Found ${discoveredCount} matching listing${discoveredCount === 1 ? "" : "s"} on the current page.`
+      : "No matching Grailed listings were found on the current page.",
+    timestamp: new Date().toISOString()
+  });
+}
+
+function normalizeAutomationConfig(config) {
+  return {
+    brand: String(config?.brand || "").trim(),
+    size: String(config?.size || "").trim(),
+    category: String(config?.category || "").trim(),
+    maxPrice: Number(config?.maxPrice) > 0 ? Number(config.maxPrice) : null,
+    aggressiveness: Math.min(100, Math.max(0, Number(config?.aggressiveness) || 45)),
+    sourceTabId: config?.sourceTabId || null
+  };
 }
 
 function matchesSearchFilters(listing, config) {
-  const brandOk = !config.brand || !listing.brand || (listing.brand || "").toLowerCase().includes(config.brand.toLowerCase());
-  const sizeOk = !config.size || !listing.size || (listing.size || "").toLowerCase().includes(config.size.toLowerCase());
-  const categoryOk = !config.category || !listing.category || (listing.category || "").toLowerCase().includes(config.category.toLowerCase());
-  const priceOk = !config.maxPrice || !listing.price || Number(listing.price) <= Number(config.maxPrice);
+  const brandOk = !config.brand || Boolean(listing.brand && listing.brand.toLowerCase().includes(config.brand.toLowerCase()));
+  const sizeOk = !config.size || Boolean(listing.size && listing.size.toLowerCase().includes(config.size.toLowerCase()));
+  const categoryOk = !config.category || Boolean(listing.category && listing.category.toLowerCase().includes(config.category.toLowerCase()));
+  const priceOk = !config.maxPrice || (Number(listing.price) > 0 && Number(listing.price) <= Number(config.maxPrice));
   return brandOk && sizeOk && categoryOk && priceOk;
 }
 
@@ -219,8 +278,15 @@ async function scheduleQueuedNegotiations() {
     return;
   }
 
-  const eligible = Object.values(runtime.negotiations).filter((item) => item.status === "queued" || item.status === "countered");
+  const eligible = Object.values(runtime.negotiations)
+    .filter((item) => item?.listingId)
+    .filter((item) => item.status === "queued" || item.status === "countered");
+
   for (const negotiation of eligible) {
+    const existingAlarm = await chrome.alarms.get(`${OFFER_ALARM_PREFIX}${negotiation.listingId}`);
+    if (existingAlarm) {
+      continue;
+    }
     const canSend = await withinRateLimits(settings);
     if (!canSend) {
       break;
@@ -250,7 +316,8 @@ async function withinRateLimits(settings) {
   const oneDayAgo = now - (24 * 60 * 60 * 1000);
   const sentTimes = runtime.offerHistory
     .filter((entry) => entry.type === "offer_sent")
-    .map((entry) => new Date(entry.timestamp).getTime());
+    .map((entry) => new Date(entry.timestamp).getTime())
+    .filter((time) => Number.isFinite(time));
   const hourCount = sentTimes.filter((time) => time >= oneHourAgo).length;
   const dayCount = sentTimes.filter((time) => time >= oneDayAgo).length;
   return hourCount < settings.offerLimitHour && dayCount < settings.offerLimitDay;
@@ -265,12 +332,12 @@ async function executeNegotiation(listingId) {
   if (!negotiation || !runtime.automation.running) {
     return;
   }
+  if (!negotiation.url) {
+    await requeueNegotiation(listingId, "Cannot negotiate without a valid listing URL.");
+    return;
+  }
   if (!(await withinRateLimits(settings))) {
-    await GrailedStorage.appendActivity({
-      type: "rate_limit",
-      message: `Paused ${negotiation.title || listingId} because offer limits were reached.`,
-      timestamp: new Date().toISOString()
-    });
+    await requeueNegotiation(listingId, `Paused ${negotiation.title || listingId} because offer limits were reached.`);
     return;
   }
 
@@ -291,54 +358,55 @@ async function executeNegotiation(listingId) {
 
 async function handleExecutionResult(payload, sender) {
   const runtime = await GrailedStorage.getRuntime();
-  const negotiation = runtime.negotiations[payload.listingId];
+  const negotiation = runtime.negotiations[payload?.listingId];
   if (!negotiation) {
     return {};
   }
 
   const executionTabId = sender.tab?.id;
   if (executionTabId && EXECUTION_TABS.has(executionTabId)) {
-    EXECUTION_TABS.delete(executionTabId);
-    try {
-      await chrome.tabs.remove(executionTabId);
-    } catch (error) {
-      console.warn("Failed to close execution tab", error);
-    }
+    await closeExecutionTab(executionTabId);
   }
 
+  const previousCounter = Number(negotiation.sellerCounter) || null;
+  const nextCounter = payload.pageData?.counterOffer ?? negotiation.sellerCounter;
   const updatedNegotiation = {
     ...negotiation,
-    sellerCounter: payload.pageData?.counterOffer ?? negotiation.sellerCounter,
+    sellerCounter: nextCounter,
     sellerResponseHours: payload.pageData?.sellerResponseHours ?? negotiation.sellerResponseHours,
     askingPrice: payload.pageData?.price ?? negotiation.askingPrice,
+    title: payload.pageData?.title || negotiation.title,
     updatedAt: new Date().toISOString()
   };
 
   if (payload.pageData?.sold) {
-    await markNegotiationClosed(updatedNegotiation, "lost", "Listing sold before offer could be sent.");
+    await markNegotiationClosed(updatedNegotiation, "lost", "Listing sold before an offer could be completed.");
     return getPopupState();
   }
 
   if (!payload.ok) {
-    await GrailedStorage.upsertNegotiation({
-      ...updatedNegotiation,
-      status: "queued"
-    });
-    await GrailedStorage.appendActivity({
-      type: "error",
-      message: `${updatedNegotiation.title || updatedNegotiation.listingId}: ${payload.error}`,
-      timestamp: new Date().toISOString()
-    });
-    await scheduleQueuedNegotiations();
+    await requeueNegotiation(updatedNegotiation.listingId, `${updatedNegotiation.title || updatedNegotiation.listingId}: ${payload.error || "Offer execution failed."}`, updatedNegotiation);
     return getPopupState();
   }
 
   if (payload.result === "offer_sent") {
     const timestamp = new Date().toISOString();
+    const history = [
+      ...(Array.isArray(updatedNegotiation.history) ? updatedNegotiation.history : []),
+      {
+        role: "buyer",
+        amount: payload.offer,
+        message: payload.message,
+        timestamp
+      }
+    ].slice(-10);
     await GrailedStorage.upsertNegotiation({
       ...updatedNegotiation,
       lastOffer: payload.offer,
       rounds: payload.rounds,
+      lastMessage: payload.message || "",
+      lastMessageSource: payload.messageSource || "template",
+      history,
       status: "waiting_response"
     });
     await GrailedStorage.appendOfferHistory({
@@ -356,7 +424,7 @@ async function handleExecutionResult(payload, sender) {
     });
     await GrailedStorage.appendActivity({
       type: "offer_sent",
-      message: `Sent $${payload.offer} on ${updatedNegotiation.title || updatedNegotiation.listingId}.`,
+      message: `Sent $${payload.offer} on ${updatedNegotiation.title || updatedNegotiation.listingId} using ${payload.messageSource || "template"} messaging.`,
       timestamp
     });
     await notifyIfEnabled("Offer sent", `${updatedNegotiation.title || "Listing"}: $${payload.offer}`);
@@ -365,19 +433,50 @@ async function handleExecutionResult(payload, sender) {
   if (payload.result === "waiting") {
     await GrailedStorage.upsertNegotiation({
       ...updatedNegotiation,
-      status: "waiting_response"
+      status: payload.pageData?.counterOffer ? "countered" : "waiting_response"
     });
   }
 
   if (payload.result === "accepted_counter") {
-    await markNegotiationClosed(updatedNegotiation, "won", `Accepted seller counter at $${payload.offer}.`);
+    const history = [
+      ...(Array.isArray(updatedNegotiation.history) ? updatedNegotiation.history : []),
+      {
+        role: "seller",
+        counter: Number(updatedNegotiation.sellerCounter) || payload.offer || null,
+        timestamp: new Date().toISOString()
+      }
+    ].slice(-10);
+    await markNegotiationClosed({
+      ...updatedNegotiation,
+      sellerCounter: payload.offer || updatedNegotiation.sellerCounter,
+      history
+    }, "won", `Accepted seller counter at $${payload.offer}.`);
   }
 
   if (payload.result === "walk_away") {
-    await markNegotiationClosed(updatedNegotiation, "walked", payload.reason || "Walked away after negotiation cap.");
+    await markNegotiationClosed(updatedNegotiation, "walked", payload.reason || "Walked away after reaching the negotiation cap.");
   }
 
-  if (payload.pageData?.counterOffer) {
+  if (
+    nextCounter &&
+    nextCounter !== previousCounter &&
+    payload.result !== "accepted_counter" &&
+    payload.result !== "walk_away"
+  ) {
+    const timestamp = new Date().toISOString();
+    const history = [
+      ...(Array.isArray(updatedNegotiation.history) ? updatedNegotiation.history : []),
+      {
+        role: "seller",
+        counter: Number(nextCounter),
+        timestamp
+      }
+    ].slice(-10);
+    await GrailedStorage.upsertNegotiation({
+      ...updatedNegotiation,
+      history,
+      status: payload.result === "offer_sent" ? "waiting_response" : "countered"
+    });
     const refreshedRuntime = await GrailedStorage.getRuntime();
     await GrailedStorage.setRuntime({
       stats: {
@@ -387,20 +486,43 @@ async function handleExecutionResult(payload, sender) {
     });
     await GrailedStorage.appendActivity({
       type: "counter",
-      message: `${updatedNegotiation.title || updatedNegotiation.listingId} countered at $${payload.pageData.counterOffer}.`,
-      timestamp: new Date().toISOString()
+      message: `${updatedNegotiation.title || updatedNegotiation.listingId} countered at $${nextCounter}.`,
+      timestamp
     });
-    await notifyIfEnabled("Counter-offer received", `${updatedNegotiation.title || "Listing"}: $${payload.pageData.counterOffer}`);
+    await notifyIfEnabled("Counter-offer received", `${updatedNegotiation.title || "Listing"}: $${nextCounter}`);
   }
 
+  await scheduleQueuedNegotiations();
   return getPopupState();
+}
+
+async function requeueNegotiation(listingId, message, baseRecord) {
+  const runtime = await GrailedStorage.getRuntime();
+  const negotiation = baseRecord || runtime.negotiations[listingId];
+  if (!negotiation) {
+    return;
+  }
+  await chrome.alarms.clear(`${OFFER_ALARM_PREFIX}${listingId}`);
+  await GrailedStorage.upsertNegotiation({
+    ...negotiation,
+    status: "queued",
+    scheduledFor: null,
+    executionTabId: null,
+    updatedAt: new Date().toISOString()
+  });
+  if (message) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message,
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 async function markNegotiationClosed(negotiation, outcome, message) {
   const timestamp = new Date().toISOString();
-  const runtime = await GrailedStorage.getRuntime();
   const askingPrice = Number(negotiation.askingPrice) || 0;
-  const finalPrice = Number(negotiation.lastOffer || negotiation.sellerCounter || askingPrice) || askingPrice;
+  const finalPrice = Number(negotiation.sellerCounter || negotiation.lastOffer || askingPrice) || askingPrice;
   const savingsDelta = Math.max(0, askingPrice - finalPrice);
   const dealLogEntry = {
     listingId: negotiation.listingId,
@@ -413,9 +535,13 @@ async function markNegotiationClosed(negotiation, outcome, message) {
     timestamp
   };
 
+  await chrome.alarms.clear(`${OFFER_ALARM_PREFIX}${negotiation.listingId}`);
   await GrailedStorage.upsertNegotiation({
     ...negotiation,
-    status: outcome
+    status: outcome,
+    scheduledFor: null,
+    executionTabId: null,
+    updatedAt: timestamp
   });
   await GrailedStorage.appendActivity({
     type: outcome,
@@ -439,6 +565,15 @@ async function markNegotiationClosed(negotiation, outcome, message) {
 
   if (outcome === "won") {
     await notifyIfEnabled("Deal closed", message);
+  }
+}
+
+async function closeExecutionTab(tabId) {
+  EXECUTION_TABS.delete(tabId);
+  try {
+    await chrome.tabs.remove(tabId);
+  } catch (error) {
+    console.warn("Failed to close execution tab", error);
   }
 }
 

@@ -11,7 +11,8 @@
   ],
   "host_permissions": [
     "https://www.grailed.com/*",
-    "https://*.workers.dev/*"
+    "https://*/*",
+    "http://localhost/*"
   ],
   "action": {
     "default_title": "Grailed Auto-Negotiator",
@@ -29,7 +30,6 @@
       "js": [
         "lib/templates.js",
         "lib/negotiator.js",
-        "lib/ai-negotiator.js",
         "lib/scraper.js",
         "content/content.js"
       ],

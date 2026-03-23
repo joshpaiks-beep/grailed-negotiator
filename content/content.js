@@ -48,6 +48,16 @@
   async function executeNegotiationStep(negotiation, config) {
     const pageData = GrailedScraper.scrapeListingData();
     latestPageSnapshot = pageData;
+    if (!pageData.listingId || !pageData.price) {
+      await sendExecutionResult({
+        ok: false,
+        listingId: pageData.listingId || negotiation.listingId,
+        pageData,
+        error: "Could not read the current Grailed listing details."
+      });
+      return { ok: false, error: "Listing data missing." };
+    }
+
     const decision = GrailedNegotiator.decideNextAction({
       listing: pageData,
       config,
@@ -88,11 +98,35 @@
       return { ok: true };
     }
 
+    let messageResult = null;
+    if (decision.action === "send_offer") {
+      const messageResponse = await chrome.runtime.sendMessage({
+        type: "GENERATE_NEGOTIATION_MESSAGE",
+        payload: {
+          listing: pageData,
+          config,
+          negotiation,
+          sellerCounter: pageData.counterOffer,
+          targetOffer: decision.offer
+        }
+      });
+      if (!messageResponse?.ok || !messageResponse.messageResult?.message) {
+        await sendExecutionResult({
+          ok: false,
+          listingId: pageData.listingId || negotiation.listingId,
+          pageData,
+          error: messageResponse?.error || "Could not generate a negotiation message."
+        });
+        return { ok: false, error: messageResponse?.error || "Message generation failed." };
+      }
+      messageResult = messageResponse.messageResult;
+    }
+
     const submitResult = decision.action === "accept_counter"
       ? await GrailedScraper.acceptCounter()
       : await GrailedScraper.submitOffer({
           offer: decision.offer,
-          message: GrailedTemplates.renderTemplate(decision.offer)
+          message: messageResult.message
         });
 
     if (!submitResult.ok) {
@@ -111,7 +145,9 @@
       listingId: pageData.listingId || negotiation.listingId,
       pageData,
       offer: decision.offer,
-      rounds: decision.rounds
+      rounds: decision.rounds,
+      message: messageResult?.message || "",
+      messageSource: messageResult?.source || "template"
     });
 
     return { ok: true };

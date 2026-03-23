@@ -1,23 +1,32 @@
 (function initOptions() {
   const form = document.getElementById("settings-form");
   const dealLog = document.getElementById("deal-log");
+  const statusBanner = document.getElementById("status-banner");
+  let busy = false;
 
   form.addEventListener("submit", onSubmit);
   bootstrap();
 
   async function bootstrap() {
-    const response = await chrome.runtime.sendMessage({ type: "GET_OPTIONS_STATE" });
-    if (!response.ok) {
-      return;
+    setBusy(true, "Loading settings...");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "GET_OPTIONS_STATE" });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not load settings.");
+      }
+      hydrate(response.settings);
+      renderDealLog(response.settings.dealLog || []);
+      setStatus("Settings loaded.", "info");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
     }
-    hydrate(response.settings);
-    renderDealLog(response.settings.dealLog || []);
   }
 
   function hydrate(settings) {
     form.aiMode.checked = settings.aiMode !== false;
     form.workerUrl.value = settings.workerUrl || "";
-    form.apiKey.value = settings.apiKey || "";
     form.defaultAggressiveness.value = settings.defaultAggressiveness ?? 45;
     form.notificationsEnabled.checked = Boolean(settings.notificationsEnabled);
     form.offerLimitHour.value = settings.offerLimitHour ?? 10;
@@ -27,11 +36,11 @@
 
   async function onSubmit(event) {
     event.preventDefault();
+    setBusy(true, "Saving settings...");
     const payload = {
       aiMode: form.aiMode.checked,
       workerUrl: form.workerUrl.value.trim(),
-      apiKey: form.apiKey.value.trim(),
-      defaultAggressiveness: Number(form.defaultAggressiveness.value),
+      defaultAggressiveness: Number(form.defaultAggressiveness.value) || 45,
       notificationsEnabled: form.notificationsEnabled.checked,
       offerLimitHour: Number(form.offerLimitHour.value) || 10,
       offerLimitDay: Number(form.offerLimitDay.value) || 30,
@@ -40,14 +49,25 @@
         .map((value) => value.trim())
         .filter(Boolean)
     };
-    const response = await chrome.runtime.sendMessage({
-      type: "SAVE_SETTINGS",
-      payload
-    });
-    if (!response.ok) {
-      return;
+    try {
+      if (payload.workerUrl && !/^https?:\/\//i.test(payload.workerUrl)) {
+        throw new Error("Worker URL must start with http:// or https://.");
+      }
+      const response = await chrome.runtime.sendMessage({
+        type: "SAVE_SETTINGS",
+        payload
+      });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not save settings.");
+      }
+      hydrate(response.settings);
+      renderDealLog(response.settings.dealLog || []);
+      setStatus("Settings saved.", "success");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
     }
-    hydrate(response.settings);
   }
 
   function renderDealLog(entries) {
@@ -77,5 +97,27 @@
       row.append(left, right);
       dealLog.appendChild(row);
     }
+  }
+
+  function setBusy(nextBusy, message) {
+    busy = nextBusy;
+    Array.from(form.elements).forEach((element) => {
+      element.disabled = busy;
+    });
+    if (message) {
+      setStatus(message, "info");
+    }
+  }
+
+  function setStatus(message, tone) {
+    if (!message) {
+      statusBanner.hidden = true;
+      statusBanner.textContent = "";
+      statusBanner.dataset.tone = "";
+      return;
+    }
+    statusBanner.hidden = false;
+    statusBanner.textContent = message;
+    statusBanner.dataset.tone = tone || "info";
   }
 })();

@@ -4,6 +4,7 @@
   const aggressivenessInput = document.getElementById("aggressiveness");
   const aggressivenessLabel = document.getElementById("aggressiveness-label");
   const refreshButton = document.getElementById("refresh-button");
+  const statusBanner = document.getElementById("status-banner");
 
   const statsSavings = document.getElementById("stat-savings");
   const statsActive = document.getElementById("stat-active");
@@ -14,6 +15,7 @@
 
   let runtimeState = null;
   let settingsState = null;
+  let busy = false;
 
   form.addEventListener("submit", onSubmit);
   refreshButton.addEventListener("click", onRefresh);
@@ -22,14 +24,22 @@
   bootstrap();
 
   async function bootstrap() {
-    const response = await chrome.runtime.sendMessage({ type: "POPUP_GET_STATE" });
-    if (!response.ok) {
-      return;
+    setBusy(true, "Loading current automation state...");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "POPUP_GET_STATE" });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not load popup state.");
+      }
+      runtimeState = response.runtime;
+      settingsState = response.settings;
+      hydrateForm();
+      render();
+      setStatus(runtimeState.activityFeed?.[0]?.message || "", runtimeState.activityFeed?.[0]?.type === "error" ? "error" : "info");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
     }
-    runtimeState = response.runtime;
-    settingsState = response.settings;
-    hydrateForm();
-    render();
   }
 
   function hydrateForm() {
@@ -57,46 +67,73 @@
 
   async function onSubmit(event) {
     event.preventDefault();
-    if (runtimeState?.automation?.running) {
-      const response = await chrome.runtime.sendMessage({ type: "STOP_AUTOMATION" });
+    setBusy(true, runtimeState?.automation?.running ? "Stopping automation..." : "Starting automation...");
+    try {
+      if (runtimeState?.automation?.running) {
+        const response = await chrome.runtime.sendMessage({ type: "STOP_AUTOMATION" });
+        if (!response.ok) {
+          throw new Error(response.error || "Could not stop automation.");
+        }
+        runtimeState = response.runtime;
+        settingsState = response.settings;
+        render();
+        setStatus("Automation stopped.", "info");
+        return;
+      }
+
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const payload = {
+        brand: form.brand.value.trim(),
+        size: form.size.value.trim(),
+        category: form.category.value.trim(),
+        maxPrice: Number(form.maxPrice.value) || null,
+        aggressiveness: Number(form.aggressiveness.value),
+        sourceTabId: tab?.id || null
+      };
+      if (!payload.maxPrice) {
+        throw new Error("Set a max price before starting automation.");
+      }
+
+      const response = await chrome.runtime.sendMessage({
+        type: "START_AUTOMATION",
+        payload
+      });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not start automation.");
+      }
       runtimeState = response.runtime;
       settingsState = response.settings;
       render();
-      return;
+      setStatus("Automation started. Keep a Grailed listing or search tab open for discovery.", "success");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
     }
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const payload = {
-      brand: form.brand.value.trim(),
-      size: form.size.value.trim(),
-      category: form.category.value.trim(),
-      maxPrice: Number(form.maxPrice.value) || null,
-      aggressiveness: Number(form.aggressiveness.value),
-      sourceTabId: tab?.id || null
-    };
-    const response = await chrome.runtime.sendMessage({
-      type: "START_AUTOMATION",
-      payload
-    });
-    if (!response.ok) {
-      return;
-    }
-    runtimeState = response.runtime;
-    settingsState = response.settings;
-    render();
   }
 
   async function onRefresh() {
-    const response = await chrome.runtime.sendMessage({ type: "REFRESH_FROM_ACTIVE_TAB" });
-    if (!response.ok) {
-      return;
+    setBusy(true, "Refreshing matches from the active tab...");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "REFRESH_FROM_ACTIVE_TAB" });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not refresh from the active tab.");
+      }
+      runtimeState = response.runtime;
+      settingsState = response.settings;
+      render();
+      setStatus(runtimeState.activityFeed?.[0]?.message || "Refresh complete.", "info");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
     }
-    runtimeState = response.runtime;
-    settingsState = response.settings;
-    render();
   }
 
   function render() {
+    if (!runtimeState || !settingsState) {
+      return;
+    }
     const stats = runtimeState.stats;
     statsSavings.textContent = `$${stats.totalSavings}`;
     statsActive.textContent = String(stats.activeNegotiations);
@@ -105,6 +142,8 @@
     countersPill.textContent = `${stats.countersReceived} counters`;
     startStopButton.textContent = runtimeState.automation.running ? "Stop Negotiation" : "Start Negotiation";
     startStopButton.dataset.mode = runtimeState.automation.running ? "stop" : "start";
+    refreshButton.disabled = busy;
+    startStopButton.disabled = busy;
 
     renderActivity(runtimeState.activityFeed || []);
   }
@@ -135,5 +174,25 @@
       card.append(message, time);
       activityFeed.appendChild(card);
     }
+  }
+
+  function setBusy(nextBusy, message) {
+    busy = nextBusy;
+    if (message) {
+      setStatus(message, "info");
+    }
+    render();
+  }
+
+  function setStatus(message, tone) {
+    if (!message) {
+      statusBanner.hidden = true;
+      statusBanner.textContent = "";
+      statusBanner.dataset.tone = "";
+      return;
+    }
+    statusBanner.hidden = false;
+    statusBanner.textContent = message;
+    statusBanner.dataset.tone = tone || "info";
   }
 })();

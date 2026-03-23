@@ -52,6 +52,26 @@ body {
   margin: 0;
 }
 
+.status-banner {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.status-banner[data-tone="error"] {
+  border-color: rgba(255, 95, 95, 0.45);
+  background: rgba(255, 95, 95, 0.12);
+}
+
+.status-banner[data-tone="success"] {
+  border-color: rgba(102, 214, 171, 0.4);
+  background: rgba(102, 214, 171, 0.12);
+}
+
 .settings-form,
 .settings-form label,
 .deal-log {
@@ -112,6 +132,13 @@ body {
   cursor: pointer;
 }
 
+.cta-button:disabled,
+.settings-form input:disabled,
+.settings-form textarea:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .deal-row {
   justify-content: space-between;
   padding: 14px;
@@ -131,4 +158,17 @@ body {
   border-radius: 16px;
   color: var(--muted);
   text-align: center;
+}
+
+@media (max-width: 720px) {
+  .options-shell {
+    width: min(100vw - 20px, 960px);
+    padding-top: 18px;
+  }
+
+  .grid-two,
+  .deal-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

@@ -10,7 +10,8 @@
     <main class="options-shell">
       <section class="hero">
         <p class="eyebrow">Settings</p>
-        <h1>Negotiation controls, future AI wiring, and historical deal data.</h1>
+        <h1>Configure live AI messaging, negotiation limits, and completed deal history.</h1>
+        <p id="status-banner" class="status-banner" hidden></p>
       </section>
 
       <section class="panel">
@@ -23,10 +24,6 @@
           <label>
             <span>AI Worker URL</span>
             <input id="worker-url" name="workerUrl" type="text" placeholder="https://grailed-negotiator.YOUR_SUBDOMAIN.workers.dev">
-          </label>
-          <label>
-            <span>Cloudflare Worker API Key</span>
-            <input id="api-key" name="apiKey" type="password" placeholder="Saved for future AI mode">
           </label>
           <label>
             <span>Default Aggressiveness</span>

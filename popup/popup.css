@@ -60,6 +60,27 @@ body {
   line-height: 1.08;
 }
 
+.status-banner {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status-banner[data-tone="error"] {
+  border-color: rgba(255, 95, 95, 0.45);
+  background: rgba(255, 95, 95, 0.12);
+}
+
+.status-banner[data-tone="success"] {
+  border-color: rgba(102, 214, 171, 0.4);
+  background: rgba(102, 214, 171, 0.12);
+}
+
 .panel {
   padding: 14px;
   border: 1px solid var(--border);
@@ -136,6 +157,13 @@ input[type="range"] {
 .ghost-button {
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.cta-button:disabled,
+.ghost-button:disabled,
+.config-form input:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .stats-grid article {
