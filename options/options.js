@@ -29,9 +29,13 @@
     form.workerUrl.value = settings.workerUrl || "";
     form.defaultAggressiveness.value = settings.defaultAggressiveness ?? 45;
     form.notificationsEnabled.checked = Boolean(settings.notificationsEnabled);
-    form.offerLimitHour.value = settings.offerLimitHour ?? 10;
-    form.offerLimitDay.value = settings.offerLimitDay ?? 30;
+    form.offerLimitHour.value = settings.offerLimitHour ?? 3;
+    form.offerLimitDay.value = settings.offerLimitDay ?? 10;
     form.blockedSellers.value = (settings.blockedSellers || []).join("\n");
+    // New fields
+    form.offerMode.value = settings.offerMode || "approval";
+    form.maxConcurrentOffers.value = settings.maxConcurrentOffers ?? 1;
+    form.maxTotalPending.value = settings.maxTotalPending ?? 500;
   }
 
   async function onSubmit(event) {
@@ -42,12 +46,16 @@
       workerUrl: form.workerUrl.value.trim(),
       defaultAggressiveness: Number(form.defaultAggressiveness.value) || 45,
       notificationsEnabled: form.notificationsEnabled.checked,
-      offerLimitHour: Number(form.offerLimitHour.value) || 10,
-      offerLimitDay: Number(form.offerLimitDay.value) || 30,
+      offerLimitHour: Number(form.offerLimitHour.value) || 3,
+      offerLimitDay: Number(form.offerLimitDay.value) || 10,
       blockedSellers: form.blockedSellers.value
         .split("\n")
         .map((value) => value.trim())
-        .filter(Boolean)
+        .filter(Boolean),
+      // New fields
+      offerMode: form.offerMode.value,
+      maxConcurrentOffers: Math.min(3, Math.max(1, Number(form.maxConcurrentOffers.value) || 1)),
+      maxTotalPending: Math.max(1, Number(form.maxTotalPending.value) || 500)
     };
     try {
       if (payload.workerUrl && !/^https?:\/\//i.test(payload.workerUrl)) {

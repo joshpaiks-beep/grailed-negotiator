@@ -10,7 +10,7 @@
     <main class="options-shell">
       <section class="hero">
         <p class="eyebrow">Settings</p>
-        <h1>Configure live AI messaging, negotiation limits, and completed deal history.</h1>
+        <h1>Configure AI messaging, offer automation, budgets, and negotiation limits.</h1>
         <p id="status-banner" class="status-banner" hidden></p>
       </section>
 
@@ -33,6 +33,32 @@
             <input id="notifications-enabled" name="notificationsEnabled" type="checkbox">
             <span>Enable notifications</span>
           </label>
+
+          <hr class="divider">
+          <h3>Offer Automation</h3>
+
+          <label>
+            <span>Offer Mode</span>
+            <select id="offer-mode" name="offerMode">
+              <option value="approval">Approval Mode (review each offer)</option>
+              <option value="auto">Auto Mode (send offers automatically)</option>
+            </select>
+          </label>
+
+          <div class="grid-two">
+            <label>
+              <span>Max Concurrent Offers</span>
+              <input id="max-concurrent-offers" name="maxConcurrentOffers" type="number" min="1" max="3" step="1" value="1">
+            </label>
+            <label>
+              <span>Total Pending Budget ($)</span>
+              <input id="max-total-pending" name="maxTotalPending" type="number" min="1" step="1" value="500">
+            </label>
+          </div>
+
+          <hr class="divider">
+          <h3>Rate Limits</h3>
+
           <div class="grid-two">
             <label>
               <span>Offers per hour</span>
@@ -43,8 +69,12 @@
               <input id="offer-limit-day" name="offerLimitDay" type="number" min="1" step="1">
             </label>
           </div>
+
+          <hr class="divider">
+          <h3>Blocked Sellers</h3>
+
           <label>
-            <span>Blocked sellers</span>
+            <span>Blocked sellers (one per line)</span>
             <textarea id="blocked-sellers" name="blockedSellers" rows="4" placeholder="One seller per line"></textarea>
           </label>
           <button class="cta-button" type="submit">Save Settings</button>

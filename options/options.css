@@ -52,6 +52,12 @@ body {
   margin: 0;
 }
 
+.panel h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
 .status-banner {
   margin: 14px 0 0;
   padding: 12px 14px;
@@ -90,7 +96,8 @@ body {
 }
 
 .settings-form input,
-.settings-form textarea {
+.settings-form textarea,
+.settings-form select {
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -98,6 +105,11 @@ body {
   background: #1a1a1a;
   color: var(--text);
   font: inherit;
+}
+
+.settings-form select {
+  cursor: pointer;
+  appearance: auto;
 }
 
 .grid-two,
@@ -120,6 +132,12 @@ body {
   width: auto;
 }
 
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0 4px;
+}
+
 .cta-button {
   width: fit-content;
   padding: 13px 18px;
@@ -134,7 +152,8 @@ body {
 
 .cta-button:disabled,
 .settings-form input:disabled,
-.settings-form textarea:disabled {
+.settings-form textarea:disabled,
+.settings-form select:disabled {
   opacity: 0.65;
   cursor: wait;
 }

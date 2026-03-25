@@ -13,13 +13,29 @@
   const countersPill = document.getElementById("pill-counters");
   const activityFeed = document.getElementById("activity-feed");
 
+  // New elements
+  const budgetRemaining = document.getElementById("budget-remaining");
+  const budgetUsed = document.getElementById("budget-used");
+  const budgetMax = document.getElementById("budget-max");
+  const budgetFill = document.getElementById("budget-fill");
+  const approvalsPanel = document.getElementById("approvals-panel");
+  const approvalsList = document.getElementById("approvals-list");
+  const approvalCount = document.getElementById("approval-count");
+  const activeOffersPanel = document.getElementById("active-offers-panel");
+  const activeOffersList = document.getElementById("active-offers-list");
+  const activeOffersCount = document.getElementById("active-offers-count");
+  const historyToggle = document.getElementById("history-toggle");
+  const offerHistory = document.getElementById("offer-history");
+
   let runtimeState = null;
   let settingsState = null;
+  let budgetInfo = null;
   let busy = false;
 
   form.addEventListener("submit", onSubmit);
   refreshButton.addEventListener("click", onRefresh);
   aggressivenessInput.addEventListener("input", updateAggressivenessLabel);
+  historyToggle.addEventListener("click", toggleHistory);
 
   bootstrap();
 
@@ -32,6 +48,7 @@
       }
       runtimeState = response.runtime;
       settingsState = response.settings;
+      budgetInfo = response.budgetInfo;
       hydrateForm();
       render();
       setStatus(runtimeState.activityFeed?.[0]?.message || "", runtimeState.activityFeed?.[0]?.type === "error" ? "error" : "info");
@@ -76,6 +93,7 @@
         }
         runtimeState = response.runtime;
         settingsState = response.settings;
+        budgetInfo = response.budgetInfo;
         render();
         setStatus("Automation stopped.", "info");
         return;
@@ -103,6 +121,7 @@
       }
       runtimeState = response.runtime;
       settingsState = response.settings;
+      budgetInfo = response.budgetInfo;
       render();
       setStatus("Automation started. Keep a Grailed listing or search tab open for discovery.", "success");
     } catch (error) {
@@ -121,6 +140,7 @@
       }
       runtimeState = response.runtime;
       settingsState = response.settings;
+      budgetInfo = response.budgetInfo;
       render();
       setStatus(runtimeState.activityFeed?.[0]?.message || "Refresh complete.", "info");
     } catch (error) {
@@ -128,6 +148,57 @@
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onApprove(listingId) {
+    setBusy(true, "Approving offer...");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "APPROVE_OFFER",
+        payload: { listingId }
+      });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not approve offer.");
+      }
+      runtimeState = response.runtime;
+      settingsState = response.settings;
+      budgetInfo = response.budgetInfo;
+      render();
+      setStatus("Offer approved and queued for submission.", "success");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSkip(listingId) {
+    setBusy(true, "Skipping...");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "SKIP_OFFER",
+        payload: { listingId }
+      });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not skip offer.");
+      }
+      runtimeState = response.runtime;
+      settingsState = response.settings;
+      budgetInfo = response.budgetInfo;
+      render();
+      setStatus("Offer skipped.", "info");
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleHistory() {
+    const isHidden = offerHistory.hidden;
+    offerHistory.hidden = !isHidden;
+    const icon = historyToggle.querySelector(".toggle-icon");
+    if (icon) icon.textContent = isHidden ? "▲" : "▼";
   }
 
   function render() {
@@ -145,7 +216,135 @@
     refreshButton.disabled = busy;
     startStopButton.disabled = busy;
 
+    renderBudget();
+    renderPendingApprovals();
+    renderActiveOffers();
     renderActivity(runtimeState.activityFeed || []);
+    renderOfferHistory(runtimeState.offerHistory || []);
+  }
+
+  function renderBudget() {
+    if (!budgetInfo) return;
+    const remaining = Math.max(0, budgetInfo.budgetRemaining);
+    const max = budgetInfo.maxBudget || 500;
+    const used = budgetInfo.totalPending || 0;
+    const pct = max > 0 ? Math.max(0, Math.min(100, (remaining / max) * 100)) : 0;
+
+    budgetRemaining.textContent = `$${remaining}`;
+    budgetUsed.textContent = `$${used} used`;
+    budgetMax.textContent = `of $${max}`;
+    budgetFill.style.width = `${pct}%`;
+
+    // Color based on remaining
+    if (pct > 50) {
+      budgetFill.style.background = "linear-gradient(90deg, #66d6ab, #4ecdc4)";
+    } else if (pct > 20) {
+      budgetFill.style.background = "linear-gradient(90deg, #f0c27f, #fc5c7d)";
+    } else {
+      budgetFill.style.background = "linear-gradient(90deg, #ff5f5f, #ff4444)";
+    }
+  }
+
+  function renderPendingApprovals() {
+    const items = runtimeState.pendingApprovals || [];
+    approvalsPanel.hidden = items.length === 0;
+    approvalCount.textContent = String(items.length);
+    approvalsList.innerHTML = "";
+
+    for (const item of items) {
+      const card = document.createElement("article");
+      card.className = "approval-card";
+
+      const info = document.createElement("div");
+      info.className = "approval-info";
+
+      if (item.photoUrl) {
+        const img = document.createElement("img");
+        img.src = item.photoUrl;
+        img.className = "approval-thumb";
+        img.alt = item.listingTitle || "Listing photo";
+        info.appendChild(img);
+      }
+
+      const details = document.createElement("div");
+      details.className = "approval-details";
+
+      const title = document.createElement("strong");
+      title.className = "approval-title";
+      title.textContent = item.listingTitle || item.listingId;
+
+      const priceInfo = document.createElement("div");
+      priceInfo.className = "approval-prices";
+      priceInfo.innerHTML = `
+        <span class="asking">Asking: $${item.askingPrice}</span>
+        <span class="offer-amount">Offer: $${item.offerAmount}</span>
+      `;
+
+      const meta = document.createElement("small");
+      const parts = [item.brand, item.size].filter(Boolean);
+      meta.textContent = parts.length ? parts.join(" • ") : "";
+
+      details.append(title, priceInfo, meta);
+      info.append(details);
+
+      const actions = document.createElement("div");
+      actions.className = "approval-actions";
+
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "approve-btn";
+      approveBtn.textContent = "Approve & Send";
+      approveBtn.disabled = busy;
+      approveBtn.addEventListener("click", () => onApprove(item.listingId));
+
+      const skipBtn = document.createElement("button");
+      skipBtn.className = "skip-btn";
+      skipBtn.textContent = "Skip";
+      skipBtn.disabled = busy;
+      skipBtn.addEventListener("click", () => onSkip(item.listingId));
+
+      actions.append(approveBtn, skipBtn);
+      card.append(info, actions);
+      approvalsList.appendChild(card);
+    }
+  }
+
+  function renderActiveOffers() {
+    const items = runtimeState.activeOffers || [];
+    activeOffersPanel.hidden = items.length === 0;
+    activeOffersCount.textContent = String(items.length);
+    activeOffersList.innerHTML = "";
+
+    for (const item of items) {
+      const card = document.createElement("article");
+      card.className = "active-offer-card";
+
+      const title = document.createElement("strong");
+      title.textContent = item.listingTitle || item.listingId;
+
+      const offerInfo = document.createElement("span");
+      offerInfo.className = "offer-amount";
+      offerInfo.textContent = `$${item.offerAmount}`;
+
+      const status = document.createElement("span");
+      status.className = "offer-status";
+      status.textContent = item.status === "sent" ? "Awaiting response" : item.status;
+
+      const time = document.createElement("time");
+      try {
+        const d = new Date(item.sentAt);
+        time.textContent = Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      } catch (_) {
+        time.textContent = "";
+      }
+
+      card.append(title, offerInfo, status, time);
+      activeOffersList.appendChild(card);
+    }
   }
 
   function renderActivity(items) {
@@ -178,6 +377,55 @@
 
       card.append(message, time);
       activityFeed.appendChild(card);
+    }
+  }
+
+  function renderOfferHistory(items) {
+    offerHistory.innerHTML = "";
+    const recent = items.slice(0, 20);
+
+    if (!recent.length) {
+      const empty = document.createElement("div");
+      empty.className = "activity-empty";
+      empty.textContent = "No offers sent yet.";
+      offerHistory.appendChild(empty);
+      return;
+    }
+
+    for (const item of recent) {
+      const row = document.createElement("article");
+      row.className = "history-row";
+
+      const left = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = item.listingTitle || item.listingId;
+
+      const meta = document.createElement("small");
+      const typeLabel = {
+        offer_sent: "Sent",
+        offer_won: "Won ✅",
+        offer_lost: "Lost",
+        offer_walked: "Walked 🚶"
+      }[item.type] || item.type;
+      meta.textContent = `${typeLabel} • $${item.offer}`;
+
+      left.append(title, meta);
+
+      const time = document.createElement("time");
+      try {
+        const d = new Date(item.timestamp);
+        time.textContent = Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      } catch (_) {
+        time.textContent = "";
+      }
+
+      row.append(left, time);
+      offerHistory.appendChild(row);
     }
   }
 

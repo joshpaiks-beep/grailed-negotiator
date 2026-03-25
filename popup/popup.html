@@ -14,6 +14,23 @@
         <p id="status-banner" class="status-banner" hidden></p>
       </section>
 
+      <!-- Budget Display -->
+      <section class="panel budget-panel">
+        <div class="budget-bar">
+          <div class="budget-info">
+            <span class="budget-label">Budget Remaining</span>
+            <strong id="budget-remaining">$500</strong>
+          </div>
+          <div class="budget-meter">
+            <div id="budget-fill" class="budget-fill" style="width: 100%"></div>
+          </div>
+          <div class="budget-meta">
+            <span id="budget-used">$0 used</span>
+            <span id="budget-max">of $500</span>
+          </div>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-header">
           <h2>Search Setup</h2>
@@ -53,6 +70,24 @@
         </form>
       </section>
 
+      <!-- Pending Approval Section -->
+      <section class="panel" id="approvals-panel" hidden>
+        <div class="panel-header">
+          <h2>⏳ Pending Approval</h2>
+          <span id="approval-count" class="count-badge">0</span>
+        </div>
+        <div id="approvals-list" class="approvals-list"></div>
+      </section>
+
+      <!-- Active Offers Section -->
+      <section class="panel" id="active-offers-panel" hidden>
+        <div class="panel-header">
+          <h2>📤 Active Offers</h2>
+          <span id="active-offers-count" class="count-badge">0</span>
+        </div>
+        <div id="active-offers-list" class="active-offers-list"></div>
+      </section>
+
       <section class="panel stats-panel">
         <div class="stats-grid">
           <article>
@@ -79,6 +114,15 @@
           </div>
         </div>
         <div id="activity-feed" class="activity-feed"></div>
+      </section>
+
+      <!-- Offer History Section (Collapsible) -->
+      <section class="panel">
+        <div class="panel-header collapsible" id="history-toggle">
+          <h2>📋 Offer History</h2>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div id="offer-history" class="offer-history" hidden></div>
       </section>
 
       <footer class="footer">

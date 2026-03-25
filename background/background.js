@@ -73,6 +73,11 @@ async function handleMessage(message, sender) {
       return refreshFromActiveTab();
     case "GENERATE_NEGOTIATION_MESSAGE":
       return generateNegotiationMessage(message.payload);
+    // New: approval flow messages
+    case "APPROVE_OFFER":
+      return approveOffer(message.payload);
+    case "SKIP_OFFER":
+      return skipOffer(message.payload);
     default:
       return {};
   }
@@ -83,7 +88,10 @@ async function getPopupState() {
     GrailedStorage.getRuntime(),
     GrailedStorage.getSettings()
   ]);
-  return { runtime, settings };
+  // Calculate budget info
+  const totalPending = await GrailedStorage.getTotalPendingAmount();
+  const budgetRemaining = settings.maxTotalPending - totalPending;
+  return { runtime, settings, budgetInfo: { totalPending, budgetRemaining, maxBudget: settings.maxTotalPending } };
 }
 
 async function getOptionsState() {
@@ -171,6 +179,97 @@ async function generateNegotiationMessage(payload) {
   return { messageResult };
 }
 
+// --- Approval Flow ---
+
+async function approveOffer(payload) {
+  const { listingId } = payload || {};
+  if (!listingId) return getPopupState();
+
+  console.log("[Background] Approving offer for listing:", listingId);
+
+  const runtime = await GrailedStorage.getRuntime();
+  const settings = await GrailedStorage.getSettings();
+  const pending = runtime.pendingApprovals.find(p => p.listingId === listingId);
+  if (!pending) {
+    console.log("[Background] Listing not found in pending approvals:", listingId);
+    return getPopupState();
+  }
+
+  // Check budget
+  const totalPending = await GrailedStorage.getTotalPendingAmount();
+  if (totalPending + (pending.offerAmount || 0) > settings.maxTotalPending) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message: `Budget exceeded — can't approve $${pending.offerAmount} offer. Budget remaining: $${settings.maxTotalPending - totalPending}`,
+      timestamp: new Date().toISOString()
+    });
+    return getPopupState();
+  }
+
+  // Check concurrent offer limit
+  const activeCount = await GrailedStorage.getActiveOfferCount();
+  if (activeCount >= settings.maxConcurrentOffers) {
+    await GrailedStorage.appendActivity({
+      type: "error",
+      message: `Max concurrent offers (${settings.maxConcurrentOffers}) reached. Wait for a response before approving more.`,
+      timestamp: new Date().toISOString()
+    });
+    return getPopupState();
+  }
+
+  // Remove from pending, mark negotiation as queued for execution
+  await GrailedStorage.removePendingApproval(listingId);
+
+  const negotiation = runtime.negotiations[listingId];
+  if (negotiation) {
+    await GrailedStorage.upsertNegotiation({
+      ...negotiation,
+      status: "queued",
+      approvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  await GrailedStorage.appendActivity({
+    type: "system",
+    message: `Approved offer of $${pending.offerAmount} on "${pending.listingTitle || listingId}"`,
+    timestamp: new Date().toISOString()
+  });
+
+  // Schedule for execution
+  await scheduleQueuedNegotiations();
+  return getPopupState();
+}
+
+async function skipOffer(payload) {
+  const { listingId } = payload || {};
+  if (!listingId) return getPopupState();
+
+  console.log("[Background] Skipping offer for listing:", listingId);
+
+  await GrailedStorage.removePendingApproval(listingId);
+
+  const runtime = await GrailedStorage.getRuntime();
+  const negotiation = runtime.negotiations[listingId];
+  if (negotiation) {
+    await GrailedStorage.upsertNegotiation({
+      ...negotiation,
+      status: "skipped",
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  await GrailedStorage.appendActivity({
+    type: "system",
+    message: `Skipped offer on "${negotiation?.title || listingId}"`,
+    timestamp: new Date().toISOString()
+  });
+
+  return getPopupState();
+}
+
+// --- Seeding ---
+
 async function seedFromTab(tabId, config) {
   if (!tabId) {
     return;
@@ -216,6 +315,27 @@ async function seedFromTab(tabId, config) {
 
     const runtime = await GrailedStorage.getRuntime();
     const existing = runtime.negotiations[listing.listingId] || {};
+
+    // Skip if already in a terminal state or actively being processed
+    if (["won", "lost", "walked", "skipped"].includes(existing.status)) {
+      continue;
+    }
+
+    // Compute the offer amount
+    const offerAmount = GrailedNegotiator.computeOpeningOffer(listing, config);
+
+    // Check budget before adding
+    const totalPending = await GrailedStorage.getTotalPendingAmount();
+    if (totalPending + offerAmount > settings.maxTotalPending) {
+      console.log("[Background] Budget lock — skipping listing", listing.listingId, "total pending:", totalPending, "offer:", offerAmount);
+      await GrailedStorage.appendActivity({
+        type: "system",
+        message: `Budget lock: skipped "${listing.title || listing.listingId}" ($${offerAmount} would exceed $${settings.maxTotalPending} budget)`,
+        timestamp: new Date().toISOString()
+      });
+      continue;
+    }
+
     const record = {
       listingId: listing.listingId,
       url: listing.url,
@@ -230,13 +350,38 @@ async function seedFromTab(tabId, config) {
       lastOffer: existing.lastOffer || null,
       sellerCounter: listing.counterOffer ?? existing.sellerCounter ?? null,
       history: Array.isArray(existing.history) ? existing.history : [],
-      status: existing.status && existing.status !== "lost" && existing.status !== "won" && existing.status !== "walked"
-        ? existing.status
-        : "queued",
+      photos: listing.photos || [],
+      offerAmount,
       createdAt: existing.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    await GrailedStorage.upsertNegotiation(record);
+
+    // Determine if we go to approval or auto mode
+    if (settings.offerMode === "approval" && !existing.status) {
+      record.status = "pending_approval";
+      await GrailedStorage.upsertNegotiation(record);
+
+      // Add to pending approvals queue
+      await GrailedStorage.addPendingApproval({
+        listingId: listing.listingId,
+        listingTitle: listing.title || "",
+        listingUrl: listing.url,
+        askingPrice: listing.price,
+        offerAmount,
+        brand: listing.brand || "",
+        size: listing.size || "",
+        photoUrl: (listing.photos && listing.photos[0]) || "",
+        addedAt: new Date().toISOString()
+      });
+
+      console.log("[Background] Added to pending approvals:", listing.listingId, listing.title);
+    } else {
+      record.status = existing.status && !["lost", "won", "walked", "skipped"].includes(existing.status)
+        ? existing.status
+        : "queued";
+      await GrailedStorage.upsertNegotiation(record);
+    }
+
     discoveredCount += 1;
   }
 
@@ -247,6 +392,17 @@ async function seedFromTab(tabId, config) {
       : "No matching Grailed listings were found on the current page.",
     timestamp: new Date().toISOString()
   });
+
+  // Notify if there are pending approvals
+  if (settings.offerMode === "approval") {
+    const runtime = await GrailedStorage.getRuntime();
+    if (runtime.pendingApprovals.length > 0) {
+      await notifyIfEnabled(
+        "Offers waiting for approval",
+        `${runtime.pendingApprovals.length} listing${runtime.pendingApprovals.length === 1 ? "" : "s"} ready for your review`
+      );
+    }
+  }
 }
 
 function normalizeAutomationConfig(config) {
@@ -278,11 +434,20 @@ async function scheduleQueuedNegotiations() {
     return;
   }
 
+  // Check concurrent offer limit
+  const activeCount = runtime.activeOffers.length;
+
   const eligible = Object.values(runtime.negotiations)
     .filter((item) => item?.listingId)
     .filter((item) => item.status === "queued" || item.status === "countered");
 
   for (const negotiation of eligible) {
+    // Don't exceed concurrent limit
+    if (activeCount >= settings.maxConcurrentOffers) {
+      console.log("[Background] Max concurrent offers reached, pausing scheduling");
+      break;
+    }
+
     const existingAlarm = await chrome.alarms.get(`${OFFER_ALARM_PREFIX}${negotiation.listingId}`);
     if (existingAlarm) {
       continue;
@@ -291,6 +456,15 @@ async function scheduleQueuedNegotiations() {
     if (!canSend) {
       break;
     }
+
+    // Budget check
+    const totalPending = await GrailedStorage.getTotalPendingAmount();
+    const offerAmt = negotiation.offerAmount || negotiation.lastOffer || 0;
+    if (totalPending + offerAmt > settings.maxTotalPending) {
+      console.log("[Background] Budget lock — can't schedule", negotiation.listingId);
+      break;
+    }
+
     const delayMinutes = randomDelayMinutes();
     await chrome.alarms.create(`${OFFER_ALARM_PREFIX}${negotiation.listingId}`, {
       delayInMinutes: delayMinutes
@@ -409,9 +583,20 @@ async function handleExecutionResult(payload, sender) {
       history,
       status: "waiting_response"
     });
+
+    // Track as active offer
+    await GrailedStorage.addActiveOffer({
+      listingId: payload.listingId,
+      listingTitle: updatedNegotiation.title || "",
+      offerAmount: payload.offer,
+      status: "sent",
+      sentAt: timestamp
+    });
+
     await GrailedStorage.appendOfferHistory({
       type: "offer_sent",
       listingId: payload.listingId,
+      listingTitle: updatedNegotiation.title || "",
       offer: payload.offer,
       timestamp
     });
@@ -543,6 +728,21 @@ async function markNegotiationClosed(negotiation, outcome, message) {
     executionTabId: null,
     updatedAt: timestamp
   });
+
+  // Remove from active offers
+  await GrailedStorage.removeActiveOffer(negotiation.listingId);
+
+  // Log to offer history with outcome
+  await GrailedStorage.appendOfferHistory({
+    type: "offer_" + outcome,
+    listingId: negotiation.listingId,
+    listingTitle: negotiation.title || "",
+    offer: finalPrice,
+    askingPrice,
+    savings: savingsDelta,
+    timestamp
+  });
+
   await GrailedStorage.appendActivity({
     type: outcome,
     message,
@@ -566,6 +766,21 @@ async function markNegotiationClosed(negotiation, outcome, message) {
   if (outcome === "won") {
     await notifyIfEnabled("Deal closed", message);
   }
+
+  // Auto-promote next in queue if in approval mode
+  const settings2 = await GrailedStorage.getSettings();
+  if (settings2.offerMode === "approval") {
+    const rt = await GrailedStorage.getRuntime();
+    if (rt.pendingApprovals.length > 0) {
+      await notifyIfEnabled(
+        "Next offer ready",
+        `${rt.pendingApprovals.length} offer${rt.pendingApprovals.length === 1 ? "" : "s"} waiting for approval`
+      );
+    }
+  }
+
+  // Schedule any remaining queued negotiations
+  await scheduleQueuedNegotiations();
 }
 
 async function closeExecutionTab(tabId) {
