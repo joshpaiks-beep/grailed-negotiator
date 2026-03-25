@@ -10,7 +10,7 @@
     <main class="options-shell">
       <section class="hero">
         <p class="eyebrow">Settings</p>
-        <h1>Configure AI messaging, offer automation, budgets, and negotiation limits.</h1>
+        <h1>Configure negotiation mode, AI messaging, rate limits, and budgets.</h1>
         <p id="status-banner" class="status-banner" hidden></p>
       </section>
 
@@ -35,15 +35,42 @@
           </label>
 
           <hr class="divider">
-          <h3>Offer Automation</h3>
+          <h3>Negotiation Mode</h3>
 
           <label>
-            <span>Offer Mode</span>
-            <select id="offer-mode" name="offerMode">
-              <option value="approval">Approval Mode (review each offer)</option>
-              <option value="auto">Auto Mode (send offers automatically)</option>
+            <span>Mode</span>
+            <select id="negotiation-mode" name="negotiationMode">
+              <option value="message-first">Message-First (DM sellers to negotiate, then offer)</option>
+              <option value="direct-offer">Direct Offer (send offers via Grailed's Offer button)</option>
             </select>
           </label>
+
+          <label>
+            <span>Approval Mode</span>
+            <select id="offer-mode" name="offerMode">
+              <option value="approval">Approval Mode (review each message/offer)</option>
+              <option value="auto">Auto Mode (send automatically)</option>
+            </select>
+          </label>
+
+          <hr class="divider">
+          <h3>Message Rate Limits</h3>
+          <p class="hint">Messages are safe — no money committed. Higher limits recommended.</p>
+
+          <div class="grid-two">
+            <label>
+              <span>Messages per hour</span>
+              <input id="message-limit-hour" name="messageLimitHour" type="number" min="1" step="1" value="10">
+            </label>
+            <label>
+              <span>Messages per day</span>
+              <input id="message-limit-day" name="messageLimitDay" type="number" min="1" step="1" value="30">
+            </label>
+          </div>
+
+          <hr class="divider">
+          <h3>Direct Offer Settings</h3>
+          <p class="hint">Only applies when using Direct Offer mode.</p>
 
           <div class="grid-two">
             <label>
@@ -55,9 +82,6 @@
               <input id="max-total-pending" name="maxTotalPending" type="number" min="1" step="1" value="500">
             </label>
           </div>
-
-          <hr class="divider">
-          <h3>Rate Limits</h3>
 
           <div class="grid-two">
             <label>

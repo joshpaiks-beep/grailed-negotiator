@@ -430,6 +430,78 @@ input[type="range"] {
   color: var(--muted);
 }
 
+/* ---- Active Conversations (message-first) ---- */
+
+.conversations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.conversation-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(138, 132, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(138, 132, 255, 0.04);
+}
+
+.conversation-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.conversation-info strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-seller {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.conversation-target {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+}
+
+.conversation-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.conversation-status {
+  font-size: 11px;
+  color: var(--yellow);
+  white-space: nowrap;
+}
+
+.conversation-meta time {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* Message activity highlight */
+.activity-message {
+  border-color: rgba(138, 132, 255, 0.2);
+  background: rgba(138, 132, 255, 0.04);
+}
+
 /* ---- Offer History (Collapsible) ---- */
 
 .collapsible {

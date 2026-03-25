@@ -28,6 +28,8 @@
         };
       case "EXECUTE_NEGOTIATION_STEP":
         return executeNegotiationStep(message.negotiation, message.config);
+      case "EXECUTE_MESSAGE_STEP":
+        return executeMessageStep(message.negotiation, message.config, message.messageText);
       default:
         return { ok: true };
     }
@@ -151,6 +153,50 @@
     });
 
     return { ok: true };
+  }
+
+  async function executeMessageStep(negotiation, config, messageText) {
+    console.log("[ContentScript] executeMessageStep called for:", negotiation.listingId, "message:", messageText);
+
+    const pageData = GrailedScraper.scrapeListingData();
+    latestPageSnapshot = pageData;
+
+    if (!pageData.listingId) {
+      await sendMessageResult({
+        ok: false,
+        listingId: negotiation.listingId,
+        error: "Could not read the current Grailed listing."
+      });
+      return { ok: false, error: "Listing data missing." };
+    }
+
+    if (pageData.sold) {
+      await sendMessageResult({
+        ok: false,
+        listingId: pageData.listingId || negotiation.listingId,
+        error: "Listing is sold."
+      });
+      return { ok: false, error: "Listing sold." };
+    }
+
+    // Submit the message via DM
+    const result = await GrailedScraper.submitMessage(messageText);
+
+    await sendMessageResult({
+      ok: result.ok,
+      listingId: pageData.listingId || negotiation.listingId,
+      messageText,
+      error: result.error || null
+    });
+
+    return { ok: result.ok, error: result.error };
+  }
+
+  async function sendMessageResult(payload) {
+    return chrome.runtime.sendMessage({
+      type: "CONTENT_MESSAGE_RESULT",
+      payload
+    });
   }
 
   async function sendExecutionResult(payload) {

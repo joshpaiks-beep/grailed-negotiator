@@ -10,12 +10,12 @@
     <main class="popup-shell">
       <section class="hero">
         <p class="eyebrow">Grailed Auto-Negotiator</p>
-        <h1>Run smart offer flows without babysitting every listing.</h1>
+        <h1>Message sellers, negotiate prices, cop for less.</h1>
         <p id="status-banner" class="status-banner" hidden></p>
       </section>
 
-      <!-- Budget Display -->
-      <section class="panel budget-panel">
+      <!-- Budget Display (secondary in message-first mode) -->
+      <section class="panel budget-panel" id="budget-panel">
         <div class="budget-bar">
           <div class="budget-info">
             <span class="budget-label">Budget Remaining</span>
@@ -79,7 +79,16 @@
         <div id="approvals-list" class="approvals-list"></div>
       </section>
 
-      <!-- Active Offers Section -->
+      <!-- Active Conversations (message-first mode) -->
+      <section class="panel" id="conversations-panel" hidden>
+        <div class="panel-header">
+          <h2>💬 Active Conversations</h2>
+          <span id="conversations-count" class="count-badge">0</span>
+        </div>
+        <div id="conversations-list" class="conversations-list"></div>
+      </section>
+
+      <!-- Active Offers Section (direct-offer mode) -->
       <section class="panel" id="active-offers-panel" hidden>
         <div class="panel-header">
           <h2>📤 Active Offers</h2>
@@ -99,6 +108,10 @@
             <strong id="stat-active">0</strong>
           </article>
           <article>
+            <span id="stat-messages-label">Messages</span>
+            <strong id="stat-messages">0</strong>
+          </article>
+          <article>
             <span>Deals Won</span>
             <strong id="stat-won">0</strong>
           </article>
@@ -109,6 +122,7 @@
         <div class="panel-header">
           <h2>Activity</h2>
           <div class="stat-pills">
+            <span id="pill-messages">0 msgs</span>
             <span id="pill-offers">0 offers</span>
             <span id="pill-counters">0 counters</span>
           </div>
@@ -119,7 +133,7 @@
       <!-- Offer History Section (Collapsible) -->
       <section class="panel">
         <div class="panel-header collapsible" id="history-toggle">
-          <h2>📋 Offer History</h2>
+          <h2>📋 History</h2>
           <span class="toggle-icon">▼</span>
         </div>
         <div id="offer-history" class="offer-history" hidden></div>

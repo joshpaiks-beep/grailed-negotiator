@@ -9,21 +9,35 @@
   const statsSavings = document.getElementById("stat-savings");
   const statsActive = document.getElementById("stat-active");
   const statsWon = document.getElementById("stat-won");
+  const statsMessages = document.getElementById("stat-messages");
+  const messagesPill = document.getElementById("pill-messages");
   const offersPill = document.getElementById("pill-offers");
   const countersPill = document.getElementById("pill-counters");
   const activityFeed = document.getElementById("activity-feed");
 
-  // New elements
+  // Budget
+  const budgetPanel = document.getElementById("budget-panel");
   const budgetRemaining = document.getElementById("budget-remaining");
   const budgetUsed = document.getElementById("budget-used");
   const budgetMax = document.getElementById("budget-max");
   const budgetFill = document.getElementById("budget-fill");
+
+  // Approvals
   const approvalsPanel = document.getElementById("approvals-panel");
   const approvalsList = document.getElementById("approvals-list");
   const approvalCount = document.getElementById("approval-count");
+
+  // Conversations (message-first)
+  const conversationsPanel = document.getElementById("conversations-panel");
+  const conversationsList = document.getElementById("conversations-list");
+  const conversationsCount = document.getElementById("conversations-count");
+
+  // Active Offers (direct-offer)
   const activeOffersPanel = document.getElementById("active-offers-panel");
   const activeOffersList = document.getElementById("active-offers-list");
   const activeOffersCount = document.getElementById("active-offers-count");
+
+  // History
   const historyToggle = document.getElementById("history-toggle");
   const offerHistory = document.getElementById("offer-history");
 
@@ -123,7 +137,9 @@
       settingsState = response.settings;
       budgetInfo = response.budgetInfo;
       render();
-      setStatus("Automation started. Keep a Grailed listing or search tab open for discovery.", "success");
+
+      const modeLabel = settingsState.negotiationMode === "message-first" ? "message-first" : "direct-offer";
+      setStatus(`Automation started (${modeLabel} mode). Keep a Grailed listing or search tab open.`, "success");
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
@@ -151,20 +167,21 @@
   }
 
   async function onApprove(listingId) {
-    setBusy(true, "Approving offer...");
+    const isMessageFirst = settingsState?.negotiationMode === "message-first";
+    setBusy(true, isMessageFirst ? "Approving message..." : "Approving offer...");
     try {
       const response = await chrome.runtime.sendMessage({
         type: "APPROVE_OFFER",
         payload: { listingId }
       });
       if (!response.ok) {
-        throw new Error(response.error || "Could not approve offer.");
+        throw new Error(response.error || "Could not approve.");
       }
       runtimeState = response.runtime;
       settingsState = response.settings;
       budgetInfo = response.budgetInfo;
       render();
-      setStatus("Offer approved and queued for submission.", "success");
+      setStatus(isMessageFirst ? "Message approved and queued." : "Offer approved and queued.", "success");
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
@@ -180,13 +197,13 @@
         payload: { listingId }
       });
       if (!response.ok) {
-        throw new Error(response.error || "Could not skip offer.");
+        throw new Error(response.error || "Could not skip.");
       }
       runtimeState = response.runtime;
       settingsState = response.settings;
       budgetInfo = response.budgetInfo;
       render();
-      setStatus("Offer skipped.", "info");
+      setStatus("Skipped.", "info");
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
@@ -206,9 +223,13 @@
       return;
     }
     const stats = runtimeState.stats;
+    const isMessageFirst = settingsState.negotiationMode === "message-first";
+
     statsSavings.textContent = `$${stats.totalSavings}`;
     statsActive.textContent = String(stats.activeNegotiations);
     statsWon.textContent = String(stats.dealsWon);
+    statsMessages.textContent = String(stats.messagesSent || 0);
+    messagesPill.textContent = `${stats.messagesSent || 0} msgs`;
     offersPill.textContent = `${stats.offersSent} offers`;
     countersPill.textContent = `${stats.countersReceived} counters`;
     startStopButton.textContent = runtimeState.automation.running ? "Stop Negotiation" : "Start Negotiation";
@@ -216,8 +237,16 @@
     refreshButton.disabled = busy;
     startStopButton.disabled = busy;
 
+    // Budget panel: always show but dim in message-first mode
+    if (isMessageFirst) {
+      budgetPanel.style.opacity = "0.5";
+    } else {
+      budgetPanel.style.opacity = "1";
+    }
+
     renderBudget();
     renderPendingApprovals();
+    renderActiveConversations();
     renderActiveOffers();
     renderActivity(runtimeState.activityFeed || []);
     renderOfferHistory(runtimeState.offerHistory || []);
@@ -235,7 +264,6 @@
     budgetMax.textContent = `of $${max}`;
     budgetFill.style.width = `${pct}%`;
 
-    // Color based on remaining
     if (pct > 50) {
       budgetFill.style.background = "linear-gradient(90deg, #66d6ab, #4ecdc4)";
     } else if (pct > 20) {
@@ -247,6 +275,7 @@
 
   function renderPendingApprovals() {
     const items = runtimeState.pendingApprovals || [];
+    const isMessageFirst = settingsState?.negotiationMode === "message-first";
     approvalsPanel.hidden = items.length === 0;
     approvalCount.textContent = String(items.length);
     approvalsList.innerHTML = "";
@@ -277,11 +306,11 @@
       priceInfo.className = "approval-prices";
       priceInfo.innerHTML = `
         <span class="asking">Asking: $${item.askingPrice}</span>
-        <span class="offer-amount">Offer: $${item.offerAmount}</span>
+        <span class="offer-amount">Target: $${item.offerAmount}</span>
       `;
 
       const meta = document.createElement("small");
-      const parts = [item.brand, item.size].filter(Boolean);
+      const parts = [item.brand, item.size, item.sellerName ? `@${item.sellerName}` : ""].filter(Boolean);
       meta.textContent = parts.length ? parts.join(" • ") : "";
 
       details.append(title, priceInfo, meta);
@@ -292,7 +321,7 @@
 
       const approveBtn = document.createElement("button");
       approveBtn.className = "approve-btn";
-      approveBtn.textContent = "Approve & Send";
+      approveBtn.textContent = isMessageFirst ? "Message Seller" : "Approve & Send";
       approveBtn.disabled = busy;
       approveBtn.addEventListener("click", () => onApprove(item.listingId));
 
@@ -305,6 +334,66 @@
       actions.append(approveBtn, skipBtn);
       card.append(info, actions);
       approvalsList.appendChild(card);
+    }
+  }
+
+  function renderActiveConversations() {
+    const items = runtimeState.activeConversations || [];
+    conversationsPanel.hidden = items.length === 0;
+    conversationsCount.textContent = String(items.length);
+    conversationsList.innerHTML = "";
+
+    const STATUS_LABELS = {
+      messaged: "📤 Messaged",
+      awaiting_reply: "⏳ Awaiting Reply",
+      in_negotiation: "💬 In Negotiation",
+      agreed: "🤝 Agreed",
+      completed: "✅ Completed"
+    };
+
+    for (const item of items) {
+      const card = document.createElement("article");
+      card.className = "conversation-card";
+
+      const left = document.createElement("div");
+      left.className = "conversation-info";
+
+      const title = document.createElement("strong");
+      title.textContent = item.listingTitle || item.listingId;
+
+      const seller = document.createElement("span");
+      seller.className = "conversation-seller";
+      seller.textContent = item.sellerName ? `@${item.sellerName}` : "";
+
+      const target = document.createElement("span");
+      target.className = "conversation-target";
+      target.textContent = `Target: $${item.offerAmount || "?"}`;
+
+      left.append(title, seller, target);
+
+      const right = document.createElement("div");
+      right.className = "conversation-meta";
+
+      const status = document.createElement("span");
+      status.className = "conversation-status";
+      status.textContent = STATUS_LABELS[item.status] || item.status;
+
+      const time = document.createElement("time");
+      try {
+        const d = new Date(item.sentAt);
+        time.textContent = Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      } catch (_) {
+        time.textContent = "";
+      }
+
+      right.append(status, time);
+      card.append(left, right);
+      conversationsList.appendChild(card);
     }
   }
 
@@ -360,6 +449,7 @@
     for (const item of items) {
       const card = document.createElement("article");
       card.className = "activity-item";
+      if (item.type === "message_sent") card.classList.add("activity-message");
 
       const message = document.createElement("p");
       message.textContent = item.message;
