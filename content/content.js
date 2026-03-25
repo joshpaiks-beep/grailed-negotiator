@@ -178,17 +178,21 @@
   }
 
   function refreshOverlay() {
-    const overlay = ensureOverlay();
-    const current = scrapeCurrentPage();
-    if (current.type === "listing") {
-      overlay.textContent = current.listing.sold
-        ? "Grailed Negotiator: sold listing"
-        : `Grailed Negotiator: ${current.listing.canMakeOffer ? "offerable" : "view-only"} listing`;
-      overlay.dataset.visible = "true";
-      return;
+    try {
+      const overlay = ensureOverlay();
+      const current = scrapeCurrentPage();
+      if (current.type === "listing") {
+        overlay.textContent = current.listing.sold
+          ? "Grailed Negotiator: sold listing"
+          : `Grailed Negotiator: ${current.listing.canMakeOffer ? "offerable" : "view-only"} listing`;
+        overlay.dataset.visible = "true";
+        return;
+      }
+      overlay.textContent = `Grailed Negotiator: ${current.results.length} listings detected`;
+      overlay.dataset.visible = current.results.length ? "true" : "false";
+    } catch (err) {
+      console.warn("Grailed Negotiator overlay refresh error:", err);
     }
-    overlay.textContent = `Grailed Negotiator: ${current.results.length} listings detected`;
-    overlay.dataset.visible = current.results.length ? "true" : "false";
   }
 
   function ensureOverlay() {
