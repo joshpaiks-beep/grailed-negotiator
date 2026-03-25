@@ -166,10 +166,15 @@
       message.textContent = item.message;
 
       const time = document.createElement("time");
-      time.textContent = new Date(item.timestamp).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit"
-      });
+      try {
+        const d = new Date(item.timestamp);
+        time.textContent = Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      } catch (_) {
+        time.textContent = "";
+      }
 
       card.append(message, time);
       activityFeed.appendChild(card);
